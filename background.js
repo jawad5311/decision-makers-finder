@@ -16,11 +16,12 @@ function cleanDomain(value) {
   return String(value || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0].trim();
 }
 
-function buildSearchUrl(domain, query) {
+function buildSearchUrl(domain, query, linkedIn = false) {
   const cleanHost = cleanDomain(domain);
   const cleanQuery = String(query || '').trim();
   if (!cleanHost || !cleanQuery || !/^[a-z0-9.-]+$/i.test(cleanHost)) return null;
-  return `https://www.google.com/search?q=${encodeURIComponent(`${cleanHost} ${cleanQuery}`)}`;
+  const suffix = linkedIn ? ' linkedin' : '';
+  return `https://www.google.com/search?q=${encodeURIComponent(`${cleanHost} ${cleanQuery}${suffix}`)}`;
 }
 
 function randomDelayMs(minSeconds, maxSeconds) {
@@ -50,8 +51,8 @@ async function launchNextSearch() {
   if (!state.running || state.nextQueryIndex >= state.queries.length) return;
   const queryIndex = state.nextQueryIndex;
   const tab = await chrome.tabs.create({
-    url: buildSearchUrl(state.domain, state.queries[queryIndex]),
-    active: false
+    url: buildSearchUrl(state.domain, state.queries[queryIndex], state.linkedIn),
+    active: true
   });
   await setRunState({
     ...state,
@@ -98,7 +99,11 @@ async function scheduleNextProfile() {
 async function startRun(message, sender) {
   const domain = cleanDomain(message.domain);
   const queries = Array.isArray(message.queries) ? message.queries.map(value => String(value).trim()).filter(Boolean) : [];
-  if (!domain || !queries.length || !buildSearchUrl(domain, queries[0])) {
+  const savedSettings = await chrome.storage.local.get({ linkedIn: false });
+  const linkedIn = typeof message.linkedIn === 'boolean'
+    ? message.linkedIn
+    : savedSettings.linkedIn === true;
+  if (!domain || !queries.length || !buildSearchUrl(domain, queries[0], linkedIn)) {
     return { started: false, error: 'A valid domain and at least one query are required.' };
   }
   const current = await getRunState();
@@ -109,6 +114,7 @@ async function startRun(message, sender) {
     phase: 'searching',
     domain,
     queries,
+    linkedIn,
     nextQueryIndex: 0,
     queriesCompleted: 0,
     searchTabIds: [],

@@ -75,7 +75,7 @@ test('new tabs launch at 0, 2, 4, and 6 seconds while previous searches remain u
   await h.advance(4000);
   await h.advance(6000);
   assert.deepEqual(h.created.map(tab => tab.time), [0, 2000, 4000, 6000]);
-  assert.ok(h.created.every(tab => tab.active === false));
+  assert.ok(h.created.every(tab => tab.active === true));
   assert.equal(h.state().searchTabIds.length, 4);
   assert.equal(h.removed.length, 0);
   assert.match(h.created[0].url, /example.com%20owner$/);
@@ -127,4 +127,11 @@ test('verification retains its tab while further queries keep launching', async 
   assert.equal(h.created.length, 2);
   assert.equal(h.removed.length, 0);
   assert.deepEqual(h.state().verificationTabs, [100]);
+});
+
+test('LinkedIn mode appends linkedin and focuses each newly launched search tab', async () => {
+  const h = harness();
+  await h.message({ type: 'START_SEARCH_RUN', domain: 'example.com', queries: ['owner'], linkedIn: true });
+  assert.equal(h.created[0].active, true);
+  assert.match(h.created[0].url, /example.com%20owner%20linkedin$/);
 });

@@ -1,6 +1,7 @@
 const RUN_STATE_KEY = 'decisionMakerRunState';
 const DEFAULT_QUERY = 'decision makers';
 const enabledInput = document.getElementById('enabled');
+const linkedInInput = document.getElementById('linkedIn');
 const queriesInput = document.getElementById('queries');
 const startButton = document.getElementById('start');
 const stopButton = document.getElementById('stop');
@@ -46,12 +47,17 @@ function renderRunState(state) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const stored = await chrome.storage.local.get({ enabled: true, queries: [DEFAULT_QUERY], [RUN_STATE_KEY]: { running: false, phase: 'idle' } });
+  const stored = await chrome.storage.local.get({ enabled: true, linkedIn: false, queries: [DEFAULT_QUERY], [RUN_STATE_KEY]: { running: false, phase: 'idle' } });
   enabledInput.checked = stored.enabled !== false;
+  linkedInInput.checked = stored.linkedIn === true;
   queriesInput.value = (stored.queries || [DEFAULT_QUERY]).join('\n');
   [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   activeDomain = domainFromUrl(activeTab?.pendingUrl || activeTab?.url);
   renderRunState(stored[RUN_STATE_KEY]);
+});
+
+linkedInInput.addEventListener('change', async () => {
+  await chrome.storage.local.set({ linkedIn: linkedInInput.checked });
 });
 
 enabledInput.addEventListener('change', async () => {
@@ -74,6 +80,7 @@ startButton.addEventListener('click', async () => {
     type: 'START_SEARCH_RUN',
     domain: activeDomain,
     queries,
+    linkedIn: linkedInInput.checked,
     sourceTabId: activeTab.id
   });
   if (!response?.started) status.textContent = response?.error || 'Could not start the search.';
