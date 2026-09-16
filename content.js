@@ -100,16 +100,9 @@
 
   function linkedInProfileUrl(rawHref) {
     try {
-      let url = new URL(rawHref, location.href);
-      if (/(^|\.)google\./i.test(url.hostname) && url.pathname === '/url') {
-        const target = url.searchParams.get('q') || url.searchParams.get('url');
-        if (!target) return null;
-        url = new URL(target);
-      }
-      const host = url.hostname.toLowerCase().replace(/^www\./, '');
-      const match = url.pathname.match(/^\/in\/([^/?#]+)/i);
-      if (host !== 'linkedin.com' || !match) return null;
-      return `https://www.linkedin.com/in/${match[1]}/`;
+      const href = decodeURIComponent(String(rawHref || ''));
+      const match = href.match(/linkedin\.com\/in\/([^/?#&\s"']+)/i);
+      return match ? `https://www.linkedin.com/in/${match[1]}/` : null;
     } catch {
       return null;
     }
