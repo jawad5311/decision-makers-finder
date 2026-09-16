@@ -105,12 +105,13 @@ test('out-of-order concurrent results close their own tabs, dedupe, and wait for
   assert.equal(h.created.length, 5);
     assert.equal(h.created[4].active, false);
   assert.equal(h.removed.length, 4);
-  assert.ok(h.alarms[0].when >= 16000 && h.alarms[0].when <= 21000);
+  assert.equal(h.alarms[0].when, 39000);
   await h.alarm();
   assert.equal(h.created.length, 6);
   assert.equal(h.created[5].url, b);
   assert.equal(h.created[5].active, false);
-  await h.alarm();
+  assert.equal(h.state().running, true);
+  await h.message({ type: 'STOP_SEARCH_RUN' });
   assert.equal(h.state().running, false);
 });
 

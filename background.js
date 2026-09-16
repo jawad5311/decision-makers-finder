@@ -2,6 +2,7 @@ const RUN_STATE_KEY = 'decisionMakerRunState';
 const NEXT_PROFILE_ALARM = 'dmf-next-profile';
 const SEARCH_LAUNCH_GAP_MIN_MS = 2000;
 const SEARCH_LAUNCH_GAP_MAX_MS = 3000;
+const PROFILE_PROTECTION_MS = 30000;
 let searchLaunchTimer = null;
 let stateOperations = Promise.resolve();
 
@@ -82,21 +83,37 @@ async function startProfileQueue(state) {
     ...state,
     phase: 'opening-profiles',
     searchTabIds: [],
-    profileIndex: 0,
-    currentProfileUrl: state.profileLinks[0],
+    profileIndex: -1,
+    currentProfileUrl: null,
     profileTabIds: []
   };
   await setRunState(nextState);
-  // Keep the user's current tab untouched once Google research is complete.
-  const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: false });
-  nextState.profileTabIds = [tab.id];
-  await setRunState(nextState);
-  await scheduleNextProfile();
+  await openNextProfile(nextState);
 }
 
-async function scheduleNextProfile() {
+async function openNextProfile(state) {
+  const nextIndex = state.profileIndex + 1;
+  if (nextIndex >= state.profileLinks.length) return finishRun('complete');
+  const profileUrl = state.profileLinks[nextIndex];
+  // Keep the user's current tab untouched once Google research is complete.
+  const tab = await chrome.tabs.create({ url: profileUrl, active: false });
+  const nextState = {
+    ...state,
+    profileIndex: nextIndex,
+    currentProfileUrl: profileUrl,
+    profileTabIds: [...(state.profileTabIds || []), tab.id],
+    profileTabOpenedAt: { ...(state.profileTabOpenedAt || {}), [tab.id]: Date.now() }
+  };
+  await setRunState(nextState);
+  if (nextState.profileTabIds.length < 2 && nextIndex + 1 < nextState.profileLinks.length) {
+    await scheduleNextProfile(PROFILE_PROTECTION_MS);
+  }
+  return nextState;
+}
+
+async function scheduleNextProfile(delayMs = PROFILE_PROTECTION_MS) {
   await chrome.alarms.clear(NEXT_PROFILE_ALARM);
-  await chrome.alarms.create(NEXT_PROFILE_ALARM, { when: Date.now() + randomDelayMs(10, 15) });
+  await chrome.alarms.create(NEXT_PROFILE_ALARM, { when: Date.now() + delayMs });
 }
 
 async function startRun(message, sender) {
@@ -195,14 +212,8 @@ chrome.alarms.onAlarm.addListener(alarm => {
     const state = await getRunState();
     if (!state.running || state.phase !== 'opening-profiles') return;
 
-    const nextIndex = state.profileIndex + 1;
-    if (nextIndex >= state.profileLinks.length) return finishRun('complete');
-
-    const nextState = { ...state, profileIndex: nextIndex, currentProfileUrl: state.profileLinks[nextIndex] };
-    const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: false });
-    nextState.profileTabIds = [...(state.profileTabIds || []), tab.id];
-    await setRunState(nextState);
-    await scheduleNextProfile();
+    if ((state.profileTabIds || []).length >= 2) return;
+    await openNextProfile(state);
   }).catch(() => enqueueStateOperation(() => finishRun('error')));
 });
 
@@ -224,6 +235,19 @@ chrome.tabs.onRemoved.addListener(tabId => {
       if (nextState.nextQueryIndex >= nextState.queries.length && !remaining.length) {
         await startProfileQueue(nextState);
       }
+    } else if (state.phase === 'opening-profiles' && state.profileTabIds?.includes(tabId)) {
+      const openedAt = state.profileTabOpenedAt?.[tabId] || Date.now();
+      const profileTabIds = state.profileTabIds.filter(id => id !== tabId);
+      const profileTabOpenedAt = { ...(state.profileTabOpenedAt || {}) };
+      delete profileTabOpenedAt[tabId];
+      const nextState = { ...state, profileTabIds, profileTabOpenedAt };
+      await setRunState(nextState);
+      if (nextState.profileIndex >= nextState.profileLinks.length - 1) {
+        return finishRun('complete');
+      }
+      const remainingDelay = Math.max(0, PROFILE_PROTECTION_MS - (Date.now() - openedAt));
+      if (remainingDelay === 0) await openNextProfile(nextState);
+      else await scheduleNextProfile(remainingDelay);
     }
   }).catch(() => enqueueStateOperation(() => finishRun('error')));
 });
