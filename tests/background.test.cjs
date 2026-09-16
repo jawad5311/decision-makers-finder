@@ -100,11 +100,13 @@ test('out-of-order concurrent results close their own tabs, dedupe, and wait for
   await h.flush();
   assert.equal(h.state().phase, 'opening-profiles');
   assert.equal(h.created.length, 5);
+  assert.equal(h.created[4].active, true);
   assert.equal(h.removed.length, 4);
   assert.ok(h.alarms[0].when >= 16000 && h.alarms[0].when <= 21000);
   await h.alarm();
   assert.equal(h.created.length, 6);
   assert.equal(h.created[5].url, b);
+  assert.equal(h.created[5].active, false);
   await h.alarm();
   assert.equal(h.state().running, false);
 });

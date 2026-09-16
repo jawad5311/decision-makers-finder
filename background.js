@@ -193,7 +193,7 @@ chrome.alarms.onAlarm.addListener(alarm => {
     if (nextIndex >= state.profileLinks.length) return finishRun('complete');
 
     const nextState = { ...state, profileIndex: nextIndex, currentProfileUrl: state.profileLinks[nextIndex] };
-    const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: true });
+    const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: false });
     nextState.profileTabIds = [...(state.profileTabIds || []), tab.id];
     await setRunState(nextState);
     await scheduleNextProfile();

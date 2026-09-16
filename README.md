@@ -6,4 +6,4 @@ Each search tab closes after its LinkedIn profile links are collected. Results a
 
 The black popup provides an enable toggle, a one-query-per-line editor, progress text, and Start/Stop controls.
 
-The **LinkedIn** toggle appends `linkedin` to every Google query. Newly launched search tabs become the active tab as they open.
+The **LinkedIn** toggle appends `linkedin` to every Google query. Newly launched search tabs become the active tab as they open. The first LinkedIn profile becomes active; all subsequent profiles open in background tabs so the extension stops switching tabs during profile viewing.
