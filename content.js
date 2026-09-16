@@ -116,21 +116,42 @@
   }
 
   function collectLinkedInProfiles() {
-    const root = document.querySelector('#search, main, [role="main"]') || document;
-    return [...new Set([...root.querySelectorAll('a[href]')].map(anchor => linkedInProfileUrl(anchor.href)).filter(Boolean))];
+    // Search the complete document: Google may place results in different
+    // containers (and dynamically move them while the page settles).
+    return [...new Set([...document.querySelectorAll('a[href]')]
+      .map(anchor => linkedInProfileUrl(anchor.href))
+      .filter(Boolean))];
   }
 
   function reportGooglePage() {
     if (!isGooglePage() || googlePageReported) return;
-    googlePageReported = true;
-    setTimeout(() => {
+    let readyAt = document.readyState === 'complete' ? Date.now() : null;
+    const startedAt = Date.now();
+    const sendResults = () => {
+      if (googlePageReported) return;
+      googlePageReported = true;
       const needsVerification = verificationRequired();
       chrome.runtime.sendMessage({
         type: 'GOOGLE_RESULTS_READY',
         verificationRequired: needsVerification,
         links: needsVerification ? [] : collectLinkedInProfiles()
       });
-    }, 2200);
+    };
+    const poll = () => {
+      if (googlePageReported || !isGooglePage()) return;
+      if (verificationRequired()) return sendResults();
+      if (document.readyState === 'complete' && readyAt === null) readyAt = Date.now();
+      const now = Date.now();
+      // Wait for the load event and a settling period so late-rendered result
+      // anchors are included, but always report within a bounded interval.
+      if ((readyAt !== null && now - readyAt >= 3000) || now - startedAt >= 12000) return sendResults();
+      setTimeout(poll, 250);
+    };
+    if (document.readyState === 'loading') {
+      window.addEventListener('load', () => setTimeout(poll, 250), { once: true });
+    } else {
+      poll();
+    }
   }
 
   chrome.storage.local.get({ enabled: true, queries: [DEFAULT_QUERY], blacklist: [], [RUN_STATE_KEY]: { running: false, phase: 'idle' } }, result => {

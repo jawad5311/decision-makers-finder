@@ -85,7 +85,8 @@ async function startProfileQueue(state) {
     profileTabIds: []
   };
   await setRunState(nextState);
-  const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: true });
+  // Keep the user's current tab untouched once Google research is complete.
+  const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: false });
   nextState.profileTabIds = [tab.id];
   await setRunState(nextState);
   await scheduleNextProfile();
