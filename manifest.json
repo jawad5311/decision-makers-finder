@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Decision Makers Finder",
+  "version": "1.0.0",
+  "description": "Search Google for decision-maker and YouTube-channel queries from the current website.",
+  "permissions": ["storage", "activeTab", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "action": { "default_popup": "popup.html" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

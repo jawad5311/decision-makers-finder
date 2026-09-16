@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Decision Makers Finder</title>
+  <style>
+    body { width: 280px; margin: 0; padding: 16px; font: 13px Arial, sans-serif; color: #222; }
+    h1 { margin: 0 0 14px; font-size: 16px; }
+    .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    textarea { width: 100%; min-height: 72px; box-sizing: border-box; margin-top: 6px; padding: 7px; resize: vertical; }
+    label { font-weight: 600; }
+    button { width: 100%; margin-top: 10px; padding: 9px; border: 0; border-radius: 6px; background: #8e44ad; color: #fff; font-weight: 600; cursor: pointer; }
+    #status { margin-top: 10px; color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Decision Makers Finder</h1>
+  <div class="row"><span>Extension</span><input id="enabled" type="checkbox"></div>
+  <label for="queries">Search queries (one per line)</label>
+  <textarea id="queries" aria-label="Search queries"></textarea>
+  <button id="channelSearch" type="button" disabled>Find the Decision Makers</button>
+  <button id="save" type="button">Save settings</button>
+  <div id="status" role="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
