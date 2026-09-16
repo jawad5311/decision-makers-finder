@@ -1,6 +1,7 @@
 const RUN_STATE_KEY = 'decisionMakerRunState';
 const NEXT_PROFILE_ALARM = 'dmf-next-profile';
 const DEFAULT_QUERY = 'decision makers';
+const SEARCH_TAB_LIMIT = 3;
 
 function cleanDomain(value) {
   return String(value || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[/?#]/)[0].trim();
@@ -33,16 +34,59 @@ async function finishRun(phase = 'complete') {
   return setRunState({ ...state, running: false, phase, finishedAt: Date.now() });
 }
 
-async function openNextSearch(state) {
-  const url = buildSearchUrl(state.domain, state.queries[state.queryIndex]);
-  if (!url) return finishRun('error');
-  try {
-    await chrome.tabs.update(state.workTabId, { url, active: true });
-  } catch {
-    const tab = await chrome.tabs.create({ url, active: true });
-    state.workTabId = tab.id;
-    await setRunState(state);
+async function createSearchBatch(state, startIndex, existingTabIds = []) {
+  const batch = state.queries.slice(startIndex, startIndex + SEARCH_TAB_LIMIT);
+  const tabIds = existingTabIds.slice(0, batch.length);
+  const newTabs = await Promise.all(batch.slice(tabIds.length).map((query, offset) =>
+    chrome.tabs.create({ url: buildSearchUrl(state.domain, query), active: tabIds.length === 0 && offset === 0 })
+  ));
+  tabIds.push(...newTabs.map(tab => tab.id));
+
+  const searchTabQueries = {};
+  tabIds.forEach((tabId, index) => { searchTabQueries[tabId] = startIndex + index; });
+  const nextState = {
+    ...state,
+    phase: 'searching',
+    batchStart: startIndex,
+    searchTabIds: tabIds,
+    searchTabQueries,
+    searchResultsReceived: [],
+    verificationTabs: []
+  };
+  await setRunState(nextState);
+
+  await Promise.all(existingTabIds.slice(0, batch.length).map((tabId, index) =>
+    chrome.tabs.update(tabId, {
+      url: buildSearchUrl(state.domain, batch[index]),
+      active: false
+    }).catch(() => undefined)
+  ));
+
+  // Reuse the first three search tabs for later batches; close any unused tabs.
+  await Promise.all(existingTabIds.slice(batch.length).map(tabId => chrome.tabs.remove(tabId).catch(() => undefined)));
+  return nextState;
+}
+
+async function startProfileQueue(state) {
+  if (!state.profileLinks.length) {
+    await setRunState({ ...state, searchTabIds: [] });
+    await Promise.all((state.searchTabIds || []).map(tabId => chrome.tabs.remove(tabId).catch(() => undefined)));
+    return finishRun('complete');
   }
+  await Promise.all((state.searchTabIds || []).map(tabId => chrome.tabs.remove(tabId).catch(() => undefined)));
+  const nextState = {
+    ...state,
+    phase: 'opening-profiles',
+    searchTabIds: [],
+    profileIndex: 0,
+    currentProfileUrl: state.profileLinks[0],
+    profileTabIds: []
+  };
+  await setRunState(nextState);
+  const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: true });
+  nextState.profileTabIds = [tab.id];
+  await setRunState(nextState);
+  await scheduleNextProfile();
 }
 
 async function scheduleNextProfile() {
@@ -50,69 +94,68 @@ async function scheduleNextProfile() {
   await chrome.alarms.create(NEXT_PROFILE_ALARM, { when: Date.now() + randomDelayMs(10, 15) });
 }
 
-async function startProfileQueue(state) {
-  if (!state.profileLinks.length) return finishRun('complete');
-  const nextState = { ...state, phase: 'opening-profiles', profileIndex: 0, currentProfileUrl: state.profileLinks[0] };
-  await setRunState(nextState);
-  try {
-    await chrome.tabs.update(nextState.workTabId, { url: nextState.currentProfileUrl, active: true });
-  } catch {
-    const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: true });
-    nextState.workTabId = tab.id;
-    await setRunState(nextState);
-  }
-  await scheduleNextProfile();
-}
-
 async function startRun(message, sender) {
   const domain = cleanDomain(message.domain);
   const queries = Array.isArray(message.queries) ? message.queries.map(value => String(value).trim()).filter(Boolean) : [];
   if (!domain || !queries.length) return { started: false, error: 'A domain and at least one query are required.' };
-
-  await chrome.alarms.clear(NEXT_PROFILE_ALARM);
   const current = await getRunState();
   if (current.running) return { started: false, error: 'A search is already running.' };
 
-  const workTab = await chrome.tabs.create({ url: buildSearchUrl(domain, queries[0] || DEFAULT_QUERY), active: true });
   const state = {
     running: true,
     phase: 'searching',
     domain,
     queries,
-    queryIndex: 0,
+    batchStart: 0,
+    searchTabIds: [],
+    searchTabQueries: {},
+    searchResultsReceived: [],
+    verificationTabs: [],
     profileLinks: [],
     profileIndex: -1,
-    workTabId: workTab.id,
+    profileTabIds: [],
     sourceTabId: message.sourceTabId || sender.tab?.id || null,
     startedAt: Date.now()
   };
-  await setRunState(state);
-  return { started: true, workTabId: workTab.id };
+  await chrome.alarms.clear(NEXT_PROFILE_ALARM);
+  await createSearchBatch(state, 0);
+  return { started: true };
 }
 
 async function acceptGoogleResults(message, sender) {
   const state = await getRunState();
-  if (!state.running || sender.tab?.id !== state.workTabId) return { accepted: false };
+  const tabId = sender.tab?.id;
+  if (!state.running || state.phase !== 'searching' && state.phase !== 'waiting-verification' || !state.searchTabIds.includes(tabId)) {
+    return { accepted: false };
+  }
 
   if (message.verificationRequired) {
-    await setRunState({ ...state, phase: 'waiting-verification' });
+    const verificationTabs = [...new Set([...(state.verificationTabs || []), tabId])];
+    await setRunState({ ...state, phase: 'waiting-verification', verificationTabs });
     return { accepted: true, waitingForVerification: true };
   }
-  if (state.phase !== 'searching' && state.phase !== 'waiting-verification') return { accepted: false };
 
+  if (state.searchResultsReceived.includes(tabId)) return { accepted: false };
+  const received = [...state.searchResultsReceived, tabId];
   const combined = new Map((state.profileLinks || []).map(link => [link.toLowerCase(), link]));
   for (const link of message.links || []) combined.set(String(link).toLowerCase(), link);
-  const nextState = { ...state, phase: 'searching', profileLinks: [...combined.values()] };
+  const nextState = {
+    ...state,
+    phase: 'searching',
+    searchResultsReceived: received,
+    verificationTabs: (state.verificationTabs || []).filter(id => id !== tabId),
+    profileLinks: [...combined.values()]
+  };
 
-  if (state.queryIndex + 1 < state.queries.length) {
-    nextState.queryIndex += 1;
+  if (received.length < state.searchTabIds.length) {
     await setRunState(nextState);
-    setTimeout(async () => {
-      const latest = await getRunState();
-      if (!latest.running || latest.workTabId !== nextState.workTabId || latest.queryIndex !== nextState.queryIndex) return;
-      await openNextSearch(latest);
-    }, randomDelayMs(4, 7));
-    return { accepted: true, nextQuery: nextState.queryIndex };
+    return { accepted: true, remaining: state.searchTabIds.length - received.length };
+  }
+
+  const nextBatchStart = state.batchStart + state.searchTabIds.length;
+  if (nextBatchStart < state.queries.length) {
+    await createSearchBatch(nextState, nextBatchStart, state.searchTabIds);
+    return { accepted: true, nextBatchStart };
   }
 
   await startProfileQueue(nextState);
@@ -147,18 +190,18 @@ chrome.alarms.onAlarm.addListener(async alarm => {
   if (nextIndex >= state.profileLinks.length) return finishRun('complete');
 
   const nextState = { ...state, profileIndex: nextIndex, currentProfileUrl: state.profileLinks[nextIndex] };
+  const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: true });
+  nextState.profileTabIds = [...(state.profileTabIds || []), tab.id];
   await setRunState(nextState);
-  try {
-    await chrome.tabs.update(nextState.workTabId, { url: nextState.currentProfileUrl, active: true });
-  } catch {
-    const tab = await chrome.tabs.create({ url: nextState.currentProfileUrl, active: true });
-    nextState.workTabId = tab.id;
-    await setRunState(nextState);
-  }
   await scheduleNextProfile();
 });
 
 chrome.tabs.onRemoved.addListener(async tabId => {
   const state = await getRunState();
-  if (state.running && tabId === state.workTabId) await finishRun('stopped');
+  if (!state.running) return;
+  if (state.searchTabIds?.includes(tabId)) {
+    const remaining = state.searchTabIds.filter(id => id !== tabId);
+    if (!remaining.length) await finishRun('stopped');
+    else await setRunState({ ...state, searchTabIds: remaining });
+  }
 });

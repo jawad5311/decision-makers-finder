@@ -2,6 +2,7 @@
   const TOOLBAR_ID = 'dmf-floating-toolbar';
   const START_BUTTON_ID = 'dmf-start-button';
   const STOP_BUTTON_ID = 'dmf-stop-button';
+  const PROSPECT_COUNT_ID = 'dmf-prospect-count';
   const RUN_STATE_KEY = 'decisionMakerRunState';
   const DEFAULT_QUERY = 'decision makers';
   let enabled = true;
@@ -54,8 +55,14 @@
     if (!document.body) return;
     document.getElementById(START_BUTTON_ID)?.remove();
     document.getElementById(STOP_BUTTON_ID)?.remove();
+    document.getElementById(PROSPECT_COUNT_ID)?.remove();
 
     if (runState.running) {
+      const count = document.createElement('div');
+      count.id = PROSPECT_COUNT_ID;
+      count.textContent = `Unique prospects found: ${runState.profileLinks?.length || 0}`;
+      count.style.cssText = 'width:210px;box-sizing:border-box;padding:8px 10px;background:#161616;color:#fff;border:1px solid #8e44ad;border-radius:8px;font-size:13px;font-weight:700;text-align:center;box-shadow:0 3px 10px rgba(0,0,0,.25);';
+      ensureToolbar().appendChild(count);
       const stopButton = makeButton(STOP_BUTTON_ID, 'Stop Decision Maker Search', '#c0392b');
       stopButton.addEventListener('click', event => {
         event.preventDefault();

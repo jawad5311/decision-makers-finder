@@ -25,9 +25,10 @@ function domainFromUrl(rawUrl) {
 }
 
 function statusText(state) {
-  if (state.phase === 'waiting-verification') return 'Google needs verification. Complete it in the work tab; the queue will then continue.';
-  if (state.phase === 'searching') return `Searching query ${Math.min((state.queryIndex || 0) + 1, state.queries?.length || 1)} of ${state.queries?.length || 1}…`;
-  if (state.phase === 'opening-profiles') return `Opening profile ${Math.min((state.profileIndex || 0) + 1, state.profileLinks?.length || 1)} of ${state.profileLinks?.length || 1}…`;
+  const count = `Unique prospects found: ${state.profileLinks?.length || 0}`;
+  if (state.phase === 'waiting-verification') return `${count} — Google needs verification. Complete it in the work tab; the queue will then continue.`;
+  if (state.phase === 'searching') return `${count} — Searching Google in up to 3 tabs…`;
+  if (state.phase === 'opening-profiles') return `${count} — Opening profile ${Math.min((state.profileIndex || 0) + 1, state.profileLinks?.length || 1)} of ${state.profileLinks?.length || 1}…`;
   if (state.phase === 'complete') return `Complete — ${state.profileLinks?.length || 0} unique LinkedIn profiles found.`;
   if (state.phase === 'stopped') return 'Search stopped.';
   if (state.phase === 'error') return 'The search stopped because of an error.';
