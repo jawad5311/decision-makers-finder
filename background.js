@@ -1,6 +1,7 @@
 const RUN_STATE_KEY = 'decisionMakerRunState';
 const NEXT_PROFILE_ALARM = 'dmf-next-profile';
-const SEARCH_LAUNCH_GAP_MS = 2000;
+const SEARCH_LAUNCH_GAP_MIN_MS = 2000;
+const SEARCH_LAUNCH_GAP_MAX_MS = 3000;
 let searchLaunchTimer = null;
 let stateOperations = Promise.resolve();
 
@@ -63,12 +64,13 @@ async function launchNextSearch() {
 
   // Launch cadence is independent of when other search tabs finish loading.
   if (queryIndex + 1 < state.queries.length) {
+    const launchGap = SEARCH_LAUNCH_GAP_MIN_MS + Math.floor(Math.random() * (SEARCH_LAUNCH_GAP_MAX_MS - SEARCH_LAUNCH_GAP_MIN_MS + 1));
     searchLaunchTimer = setTimeout(() => {
       searchLaunchTimer = null;
       enqueueStateOperation(launchNextSearch).catch(() =>
         enqueueStateOperation(() => finishRun('error'))
       );
-    }, SEARCH_LAUNCH_GAP_MS);
+    }, launchGap);
   }
 }
 
@@ -122,6 +124,7 @@ async function startRun(message, sender) {
     searchTabQueries: {},
     verificationTabs: [],
     profileLinks: [],
+    totalProfilesFound: 0,
     profileIndex: -1,
     profileTabIds: [],
     sourceTabId: message.sourceTabId || sender.tab?.id || null,
@@ -147,14 +150,16 @@ async function acceptGoogleResults(message, sender) {
   }
 
   const combined = new Map((state.profileLinks || []).map(link => [link.toLowerCase(), link]));
-  for (const link of message.links || []) combined.set(String(link).toLowerCase(), link);
+  const links = Array.isArray(message.links) ? message.links : [];
+  for (const link of links) combined.set(String(link).toLowerCase(), link);
   const nextState = {
     ...state,
     phase: state.verificationTabs.some(id => id !== tabId) ? 'waiting-verification' : 'searching',
     queriesCompleted: state.queriesCompleted + 1,
     searchTabIds: state.searchTabIds.filter(id => id !== tabId),
     verificationTabs: (state.verificationTabs || []).filter(id => id !== tabId),
-    profileLinks: [...combined.values()]
+    profileLinks: [...combined.values()],
+    totalProfilesFound: (state.totalProfilesFound || 0) + links.length
   };
 
   await setRunState(nextState);

@@ -66,15 +66,18 @@ function harness() {
 const start = h => h.message({ type: 'START_SEARCH_RUN', domain: 'www.example.com', queries: ['owner', 'CEO', 'founder', 'director'] });
 const results = (h, id, links) => h.message({ type: 'GOOGLE_RESULTS_READY', links }, id);
 
-test('new tabs launch at 0, 2, 4, and 6 seconds while previous searches remain unfinished', async () => {
+test('new tabs launch every 2–3 seconds while previous searches remain unfinished', async () => {
   const h = harness();
   await start(h);
   await h.advance(1999);
   assert.equal(h.created.length, 1);
-  await h.advance(2000);
-  await h.advance(4000);
+  await h.advance(3000);
   await h.advance(6000);
-  assert.deepEqual(h.created.map(tab => tab.time), [0, 2000, 4000, 6000]);
+  await h.advance(9000);
+  assert.equal(h.created.length, 4);
+  assert.ok(h.created[1].time >= 2000 && h.created[1].time <= 3000);
+  assert.ok(h.created[2].time - h.created[1].time >= 2000 && h.created[2].time - h.created[1].time <= 3000);
+  assert.ok(h.created[3].time - h.created[2].time >= 2000 && h.created[3].time - h.created[2].time <= 3000);
   assert.ok(h.created.every(tab => tab.active === true));
   assert.equal(h.state().searchTabIds.length, 4);
   assert.equal(h.removed.length, 0);
@@ -89,13 +92,13 @@ test('out-of-order concurrent results close their own tabs, dedupe, and wait for
   await results(h, 100, [a]);
   assert.deepEqual(h.removed, [100]);
   assert.equal(h.state().phase, 'searching');
-  await h.advance(2000);
-  await h.advance(4000);
+  await h.advance(3000);
+  await h.advance(6000);
   await Promise.all([results(h, 102, [b]), results(h, 101, [a.toUpperCase()])]);
   await h.flush();
   assert.equal(h.state().profileLinks.length, 2);
   assert.equal(h.created.length, 3);
-  await h.advance(6000);
+  await h.advance(9000);
   await results(h, 103, []);
   await h.flush();
   assert.equal(h.state().phase, 'opening-profiles');
@@ -115,7 +118,7 @@ test('Stop cancels future launches and ignores late results', async () => {
   const h = harness();
   await start(h);
   await h.message({ type: 'STOP_SEARCH_RUN' });
-  await h.advance(2000);
+  await h.advance(3000);
   assert.equal(h.created.length, 1);
   assert.equal((await results(h, 100, ['https://www.linkedin.com/in/alice/'])).accepted, false);
   assert.equal(h.state().phase, 'stopped');
@@ -125,7 +128,7 @@ test('verification retains its tab while further queries keep launching', async 
   const h = harness();
   await start(h);
   await h.message({ type: 'GOOGLE_RESULTS_READY', verificationRequired: true }, 100);
-  await h.advance(2000);
+  await h.advance(3000);
   assert.equal(h.created.length, 2);
   assert.equal(h.removed.length, 0);
   assert.deepEqual(h.state().verificationTabs, [100]);

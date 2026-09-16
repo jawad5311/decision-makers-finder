@@ -60,7 +60,7 @@
     if (runState.running) {
       const count = document.createElement('div');
       count.id = PROSPECT_COUNT_ID;
-      count.textContent = `Unique prospects found: ${runState.profileLinks?.length || 0}`;
+      count.textContent = `${runState.profileLinks?.length || 0}/${runState.totalProfilesFound || 0}`;
       count.style.cssText = 'width:210px;box-sizing:border-box;padding:8px 10px;background:#161616;color:#fff;border:1px solid #8e44ad;border-radius:8px;font-size:13px;font-weight:700;text-align:center;box-shadow:0 3px 10px rgba(0,0,0,.25);';
       ensureToolbar().appendChild(count);
       const stopButton = makeButton(STOP_BUTTON_ID, 'Stop Decision Maker Search', '#c0392b');
@@ -140,11 +140,14 @@
     const poll = () => {
       if (googlePageReported || !isGooglePage()) return;
       if (verificationRequired()) return sendResults();
-      if (document.readyState === 'complete' && readyAt === null) readyAt = Date.now();
+      if (document.readyState === 'complete' && readyAt === null) {
+        readyAt = Date.now();
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }
       const now = Date.now();
       // Wait for the load event and a settling period so late-rendered result
       // anchors are included, but always report within a bounded interval.
-      if ((readyAt !== null && now - readyAt >= 3000) || now - startedAt >= 12000) return sendResults();
+      if ((readyAt !== null && now - readyAt >= 3500) || now - startedAt >= 15000) return sendResults();
       setTimeout(poll, 250);
     };
     if (document.readyState === 'loading') {
@@ -152,6 +155,17 @@
     } else {
       poll();
     }
+  }
+
+  function showCompletionToast(state) {
+    const id = 'dmf-completion-toast';
+    document.getElementById(id)?.remove();
+    const toast = document.createElement('div');
+    toast.id = id;
+    toast.textContent = `Decision maker search complete: ${state.profileLinks?.length || 0}/${state.totalProfilesFound || 0}`;
+    toast.style.cssText = 'position:fixed!important;right:30px!important;bottom:30px!important;z-index:2147483647!important;padding:14px 18px;background:#161616;color:#fff;border:1px solid #8e44ad;border-radius:8px;font:700 14px Arial,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.4);';
+    document.body?.appendChild(toast);
+    setTimeout(() => toast.remove(), 2500);
   }
 
   chrome.storage.local.get({ enabled: true, queries: [DEFAULT_QUERY], blacklist: [], [RUN_STATE_KEY]: { running: false, phase: 'idle' } }, result => {
@@ -169,7 +183,11 @@
     if (changes.enabled) enabled = changes.enabled.newValue !== false;
     if (changes.queries) settings.queries = changes.queries.newValue || [DEFAULT_QUERY];
     if (changes.blacklist) settings.blacklist = changes.blacklist.newValue || [];
-    if (changes[RUN_STATE_KEY]) runState = changes[RUN_STATE_KEY].newValue || { running: false, phase: 'idle' };
+    if (changes[RUN_STATE_KEY]) {
+      const previous = runState;
+      runState = changes[RUN_STATE_KEY].newValue || { running: false, phase: 'idle' };
+      if (previous.running && !runState.running && runState.phase === 'complete') showCompletionToast(runState);
+    }
     renderControls();
   });
 })();
