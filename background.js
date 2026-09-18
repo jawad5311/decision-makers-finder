@@ -55,7 +55,7 @@ async function launchNextSearch() {
   if (!state.running || state.nextQueryIndex >= state.queries.length) return;
   const queryIndex = state.nextQueryIndex;
   const tab = await chrome.tabs.create({
-    url: buildSearchUrl(state.domain, state.queries[queryIndex], state.linkedIn),
+    url: `${buildSearchUrl(state.domain, state.queries[queryIndex], state.linkedIn)}#dmf-run=${encodeURIComponent(state.runId)}&dmf-query=${queryIndex}`,
     active: true
   });
   await setRunState({
@@ -137,6 +137,7 @@ async function startRun(message, sender) {
 
   const state = {
     running: true,
+    runId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     phase: 'searching',
     domain,
     queries,
@@ -198,6 +199,20 @@ async function acceptGoogleResults(message, sender) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'GET_SEARCH_PAGE_CONTEXT') {
+    enqueueStateOperation(async () => {
+      const state = await getRunState();
+      const tabId = sender.tab?.id;
+      const pageUrl = new URL(message.url || 'https://invalid.example');
+      const marker = new URLSearchParams(pageUrl.hash.slice(1));
+      const queryIndex = state.searchTabQueries?.[tabId];
+      const expectedUrl = Number.isInteger(queryIndex) ? new URL(buildSearchUrl(state.domain, state.queries[queryIndex], state.linkedIn)) : null;
+      return { state, tabId, activeSearch: Boolean(state.runId) && marker.get('dmf-run') === state.runId && marker.get('dmf-query') === String(queryIndex) && expectedUrl?.origin === pageUrl.origin && expectedUrl?.pathname === pageUrl.pathname && expectedUrl?.searchParams.get('q') === pageUrl.searchParams.get('q') && state.running === true &&
+        ['searching', 'waiting-verification'].includes(state.phase) &&
+        (state.searchTabIds || []).includes(tabId) };
+    }).then(sendResponse).catch(() => sendResponse({ activeSearch: false }));
+    return true;
+  }
   if (message?.type === 'FORCE_NEXT_PROFILE') {
     enqueueStateOperation(async () => {
       const state = await getRunState();

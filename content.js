@@ -9,6 +9,16 @@
   let settings = { queries: [DEFAULT_QUERY], blacklist: [] };
   let runState = { running: false, phase: 'idle' };
   let googlePageReported = false;
+  let googlePageProcessing = false;
+  let searchPageTabId = null;
+  let searchPageRunId = null;
+  let searchPageUrl = null;
+
+  function canProcessGooglePage() {
+    return enabled && runState.running === true && runState.runId === searchPageRunId && location.href === searchPageUrl &&
+      ['searching', 'waiting-verification'].includes(runState.phase) &&
+      (runState.searchTabIds || []).includes(searchPageTabId);
+  }
 
   const isGooglePage = () => /(^|\.)google\./i.test(location.hostname);
   const isYouTubePage = () => location.hostname === 'youtube.com' || location.hostname.endsWith('.youtube.com');
@@ -134,12 +144,30 @@
       .filter(Boolean))];
   }
 
-  function reportGooglePage() {
-    if (!enabled || !isGooglePage() || googlePageReported) return;
-    let readyAt = document.readyState === 'complete' ? Date.now() : null;
+  async function reportGooglePage() {
+    if (!enabled || !isGooglePage() || googlePageReported || googlePageProcessing) return;
+    const marker = new URLSearchParams(location.hash.slice(1));
+    if (!marker.get('dmf-run') || !marker.has('dmf-query') || location.pathname !== '/search') return;
+    googlePageProcessing = true;
+    let context;
+    try {
+      context = await chrome.runtime.sendMessage({ type: 'GET_SEARCH_PAGE_CONTEXT', url: location.href });
+    } catch {
+      googlePageProcessing = false;
+      return;
+    }
+    if (!context?.activeSearch || !enabled) {
+      googlePageProcessing = false;
+      return;
+    }
+    runState = context.state;
+    searchPageTabId = context.tabId;
+    searchPageRunId = context.state.runId;
+    searchPageUrl = location.href;
+    let readyAt = null;
     const startedAt = Date.now();
     const sendResults = () => {
-      if (googlePageReported) return;
+      if (!canProcessGooglePage() || googlePageReported) return;
       googlePageReported = true;
       const needsVerification = verificationRequired();
       chrome.runtime.sendMessage({
@@ -150,7 +178,7 @@
       });
     };
     const poll = () => {
-      if (!enabled || googlePageReported || !isGooglePage()) return;
+      if (!canProcessGooglePage() || googlePageReported || !isGooglePage()) return;
       if (verificationRequired()) return sendResults();
       if (document.readyState === 'complete' && readyAt === null) {
         readyAt = Date.now();
