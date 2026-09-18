@@ -1,8 +1,10 @@
 const RUN_STATE_KEY = 'decisionMakerRunState';
 const NEXT_PROFILE_ALARM = 'dmf-next-profile';
 const SEARCH_LAUNCH_GAP_MIN_MS = 2000;
-const SEARCH_LAUNCH_GAP_MAX_MS = 3000;
-const PROFILE_PROTECTION_MS = 30000;
+const SEARCH_LAUNCH_GAP_MAX_MS = 5000;
+const PROFILE_DELAY_MIN_MS = 15000;
+const PROFILE_DELAY_MAX_MS = 30000;
+const MAX_PROFILE_TABS = 3;
 let searchLaunchTimer = null;
 let stateOperations = Promise.resolve();
 
@@ -76,6 +78,10 @@ async function launchNextSearch() {
 }
 
 async function startProfileQueue(state) {
+  if (state.openLinkedInProfiles === false) {
+    const tab = await chrome.tabs.create({ url: 'https://sheets.new', active: true });
+    return setRunState({ ...state, phase: 'exporting-sheet', sheetTabId: tab.id });
+  }
   if (!state.profileLinks.length) {
     return finishRun('complete');
   }
@@ -105,13 +111,13 @@ async function openNextProfile(state) {
     profileTabOpenedAt: { ...(state.profileTabOpenedAt || {}), [tab.id]: Date.now() }
   };
   await setRunState(nextState);
-  if (nextState.profileTabIds.length < 2 && nextIndex + 1 < nextState.profileLinks.length) {
-    await scheduleNextProfile(PROFILE_PROTECTION_MS);
+  if (nextState.profileTabIds.length < MAX_PROFILE_TABS && nextIndex + 1 < nextState.profileLinks.length) {
+    await scheduleNextProfile(randomDelayMs(15, 30));
   }
   return nextState;
 }
 
-async function scheduleNextProfile(delayMs = PROFILE_PROTECTION_MS) {
+async function scheduleNextProfile(delayMs = randomDelayMs(15, 30)) {
   await chrome.alarms.clear(NEXT_PROFILE_ALARM);
   await chrome.alarms.create(NEXT_PROFILE_ALARM, { when: Date.now() + delayMs });
 }
@@ -119,7 +125,7 @@ async function scheduleNextProfile(delayMs = PROFILE_PROTECTION_MS) {
 async function startRun(message, sender) {
   const domain = cleanDomain(message.domain);
   const queries = Array.isArray(message.queries) ? message.queries.map(value => String(value).trim()).filter(Boolean) : [];
-  const savedSettings = await chrome.storage.local.get({ linkedIn: false });
+  const savedSettings = await chrome.storage.local.get({ linkedIn: false, openLinkedInProfiles: true });
   const linkedIn = typeof message.linkedIn === 'boolean'
     ? message.linkedIn
     : savedSettings.linkedIn === true;
@@ -135,6 +141,8 @@ async function startRun(message, sender) {
     domain,
     queries,
     linkedIn,
+    openLinkedInProfiles: typeof message.openLinkedInProfiles === 'boolean' ? message.openLinkedInProfiles : savedSettings.openLinkedInProfiles === true,
+    records: [],
     nextQueryIndex: 0,
     queriesCompleted: 0,
     searchTabIds: [],
@@ -168,6 +176,7 @@ async function acceptGoogleResults(message, sender) {
 
   const combined = new Map((state.profileLinks || []).map(link => [link.toLowerCase(), link]));
   const links = Array.isArray(message.links) ? message.links : [];
+  const records = Array.isArray(message.records) ? message.records : [];
   for (const link of links) combined.set(String(link).toLowerCase(), link);
   const nextState = {
     ...state,
@@ -176,6 +185,7 @@ async function acceptGoogleResults(message, sender) {
     searchTabIds: state.searchTabIds.filter(id => id !== tabId),
     verificationTabs: (state.verificationTabs || []).filter(id => id !== tabId),
     profileLinks: [...combined.values()],
+    records: [...(state.records || []), ...records],
     totalProfilesFound: (state.totalProfilesFound || 0) + links.length
   };
 
@@ -188,6 +198,24 @@ async function acceptGoogleResults(message, sender) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'FORCE_NEXT_PROFILE') {
+    enqueueStateOperation(async () => {
+      const state = await getRunState();
+      if (!state.running || state.phase !== 'opening-profiles' || (state.profileTabIds || []).length >= MAX_PROFILE_TABS) return { opened: false };
+      await chrome.alarms.clear(NEXT_PROFILE_ALARM);
+      await openNextProfile(state);
+      return { opened: true };
+    }).then(sendResponse);
+    return true;
+  }
+  if (message?.type === 'GET_SHEET_ROWS') {
+    getRunState().then(state => sendResponse(state.phase === 'exporting-sheet' ? { rows: [['profile link','div 1 text','div 2 text'], ...state.profileLinks.map(link => { const row = (state.records || []).find(item => item.link === link) || {}; return [link, row.div1 || '', row.div2 || '']; })] } : {}));
+    return true;
+  }
+  if (message?.type === 'SHEET_EXPORT_DONE') {
+    enqueueStateOperation(() => finishRun('complete')).then(() => sendResponse({ ok: true }));
+    return true;
+  }
   if (message?.type === 'START_SEARCH_RUN') {
     enqueueStateOperation(() => startRun(message, sender)).then(sendResponse).catch(error => sendResponse({ started: false, error: String(error) }));
     return true;
@@ -212,7 +240,7 @@ chrome.alarms.onAlarm.addListener(alarm => {
     const state = await getRunState();
     if (!state.running || state.phase !== 'opening-profiles') return;
 
-    if ((state.profileTabIds || []).length >= 2) return;
+    if ((state.profileTabIds || []).length >= MAX_PROFILE_TABS) return;
     await openNextProfile(state);
   }).catch(() => enqueueStateOperation(() => finishRun('error')));
 });
@@ -245,9 +273,15 @@ chrome.tabs.onRemoved.addListener(tabId => {
       if (nextState.profileIndex >= nextState.profileLinks.length - 1) {
         return finishRun('complete');
       }
-      const remainingDelay = Math.max(0, PROFILE_PROTECTION_MS - (Date.now() - openedAt));
+      const remainingDelay = Math.max(0, randomDelayMs(15, 30) - (Date.now() - openedAt));
       if (remainingDelay === 0) await openNextProfile(nextState);
       else await scheduleNextProfile(remainingDelay);
     }
   }).catch(() => enqueueStateOperation(() => finishRun('error')));
 });
+
+
+
+
+
+

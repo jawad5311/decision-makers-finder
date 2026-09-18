@@ -2,6 +2,8 @@ const RUN_STATE_KEY = 'decisionMakerRunState';
 const DEFAULT_QUERY = 'decision makers';
 const enabledInput = document.getElementById('enabled');
 const linkedInInput = document.getElementById('linkedIn');
+const openProfilesInput = document.getElementById('openLinkedInProfiles');
+const forceButton = document.getElementById('force');
 const queriesInput = document.getElementById('queries');
 const startButton = document.getElementById('start');
 const stopButton = document.getElementById('stop');
@@ -40,6 +42,8 @@ function renderRunState(state) {
   const running = state?.running === true;
   startButton.style.display = running ? 'none' : 'block';
   stopButton.style.display = running ? 'block' : 'none';
+  forceButton.style.display = running && state?.phase === 'opening-profiles' ? 'block' : 'none';
+  forceButton.disabled = (state?.profileTabIds || []).length >= 3;
   startButton.disabled = !enabledInput.checked || !activeDomain;
   queriesInput.disabled = running;
   saveButton.disabled = running;
@@ -47,9 +51,10 @@ function renderRunState(state) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const stored = await chrome.storage.local.get({ enabled: true, linkedIn: false, queries: [DEFAULT_QUERY], [RUN_STATE_KEY]: { running: false, phase: 'idle' } });
+  const stored = await chrome.storage.local.get({ enabled: true, linkedIn: false, openLinkedInProfiles: true, queries: [DEFAULT_QUERY], [RUN_STATE_KEY]: { running: false, phase: 'idle' } });
   enabledInput.checked = stored.enabled !== false;
   linkedInInput.checked = stored.linkedIn === true;
+  openProfilesInput.checked = stored.openLinkedInProfiles !== false;
   queriesInput.value = (stored.queries || [DEFAULT_QUERY]).join('\n');
   [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   activeDomain = domainFromUrl(activeTab?.pendingUrl || activeTab?.url);
@@ -81,6 +86,7 @@ startButton.addEventListener('click', async () => {
     domain: activeDomain,
     queries,
     linkedIn: linkedInInput.checked,
+    openLinkedInProfiles: openProfilesInput.checked,
     sourceTabId: activeTab.id
   });
   if (!response?.started) status.textContent = response?.error || 'Could not start the search.';
@@ -93,3 +99,6 @@ stopButton.addEventListener('click', async () => {
 chrome.storage.onChanged.addListener(changes => {
   if (changes[RUN_STATE_KEY]) renderRunState(changes[RUN_STATE_KEY].newValue);
 });
+
+openProfilesInput.addEventListener('change', () => chrome.storage.local.set({ openLinkedInProfiles: openProfilesInput.checked }));
+forceButton.addEventListener('click', () => chrome.runtime.sendMessage({ type: 'FORCE_NEXT_PROFILE' }));

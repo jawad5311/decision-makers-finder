@@ -108,6 +108,24 @@
     }
   }
 
+  function collectGoogleRecords() {
+    const records = [];
+    for (const anchor of document.querySelectorAll('a[href]')) {
+      const link = linkedInProfileUrl(anchor.href);
+      if (!link) continue;
+      let container = anchor;
+      for (let i = 0; i < 8 && container; i += 1) {
+        const div1 = container.querySelector?.('div.YrbPuc');
+        const div2 = container.querySelector?.('div.VwiC3b.yXK7lf.p4wth.r025kc.Hdw6tb');
+        if (div1 || div2) {
+          records.push({ link, div1: div1?.innerText?.trim() || '', div2: div2?.innerText?.trim() || '' });
+          break;
+        }
+        container = container.parentElement;
+      }
+    }
+    return records;
+  }
   function collectLinkedInProfiles() {
     // Search the complete document: Google may place results in different
     // containers (and dynamically move them while the page settles).
@@ -127,7 +145,8 @@
       chrome.runtime.sendMessage({
         type: 'GOOGLE_RESULTS_READY',
         verificationRequired: needsVerification,
-        links: needsVerification ? [] : collectLinkedInProfiles()
+        links: needsVerification ? [] : collectLinkedInProfiles(),
+        records: needsVerification ? [] : collectGoogleRecords()
       });
     };
     const poll = () => {
@@ -150,6 +169,25 @@
     }
   }
 
+  function exportToSheet() {
+    if (!location.hostname.includes('docs.google.com') || !location.pathname.includes('/spreadsheets')) return;
+    chrome.runtime.sendMessage({ type: 'GET_SHEET_ROWS' }, async response => {
+      if (!response?.rows?.length) return;
+      const tsv = response.rows.map(row => row.map(value => String(value ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
+      try { await navigator.clipboard.writeText(tsv); } catch {}
+      const cell = document.querySelector('[role="gridcell"], .waffle-grid-container');
+      cell?.click();
+      const pasted = document.execCommand('paste');
+      if (!pasted) {
+        const notice = document.createElement('div');
+        notice.textContent = 'Sheet data copied. Click cell A1 and press Ctrl+V.';
+        notice.style.cssText = 'position:fixed;top:20px;right:20px;z-index:2147483647;padding:12px;background:#161616;color:#fff;border:1px solid #8e44ad;border-radius:8px;font:700 13px Arial';
+        document.body.appendChild(notice); setTimeout(() => notice.remove(), 5000);
+      }
+      chrome.runtime.sendMessage({ type: 'SHEET_EXPORT_DONE' });
+    });
+  }
+
   function showCompletionToast(state) {
     const id = 'dmf-completion-toast';
     document.getElementById(id)?.remove();
@@ -170,6 +208,7 @@
     runState = result[RUN_STATE_KEY];
     renderControls();
     reportGooglePage();
+    exportToSheet();
   });
 
   chrome.storage.onChanged.addListener(changes => {
@@ -187,4 +226,5 @@
     renderControls();
   });
 })();
+
 

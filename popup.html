@@ -45,10 +45,12 @@
       <span class="slider"></span>
     </label>
   </div>
+  <div class="row"><span>Open LinkedIn Profiles</span><label class="switch"><input id="openLinkedInProfiles" type="checkbox"><span class="slider"></span></label></div>
   <label for="queries">Search queries — one per line</label>
   <textarea id="queries" aria-label="Search queries"></textarea>
   <button id="start" type="button">Find the Decision Makers</button>
   <button id="stop" type="button">Stop Decision Maker Search</button>
+  <button id="force" type="button" style="display:none;background:#8e44ad">Open Next Profile Now</button>
   <button id="save" type="button">Save Queries</button>
   <div id="status" role="status"></div>
   <script src="popup.js"></script>
