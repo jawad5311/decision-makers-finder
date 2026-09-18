@@ -117,7 +117,7 @@
   }
 
   function reportGooglePage() {
-    if (!isGooglePage() || googlePageReported) return;
+    if (!enabled || !isGooglePage() || googlePageReported) return;
     let readyAt = document.readyState === 'complete' ? Date.now() : null;
     const startedAt = Date.now();
     const sendResults = () => {
@@ -131,7 +131,7 @@
       });
     };
     const poll = () => {
-      if (googlePageReported || !isGooglePage()) return;
+      if (!enabled || googlePageReported || !isGooglePage()) return;
       if (verificationRequired()) return sendResults();
       if (document.readyState === 'complete' && readyAt === null) {
         readyAt = Date.now();
@@ -173,7 +173,10 @@
   });
 
   chrome.storage.onChanged.addListener(changes => {
-    if (changes.enabled) enabled = changes.enabled.newValue !== false;
+    if (changes.enabled) {
+      enabled = changes.enabled.newValue !== false;
+      if (!enabled) googlePageReported = true;
+    }
     if (changes.queries) settings.queries = changes.queries.newValue || [DEFAULT_QUERY];
     if (changes.blacklist) settings.blacklist = changes.blacklist.newValue || [];
     if (changes[RUN_STATE_KEY]) {
@@ -184,3 +187,4 @@
     renderControls();
   });
 })();
+
